@@ -4,7 +4,7 @@
  * @NScriptType UserEventScript
  * @see https://system.netsuite.com/app/help/helpcenter.nl?fid=section_4387799721.html
  */
-define(['N/search', 'N/record', 'N/runtime', 'N/format'],
+define(['N/search', 'N/record', 'N/runtime', 'N/format', 'N/action'],
 
     /**
      * @return {{
@@ -13,7 +13,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/format'],
      *   afterSubmit?: Function,
      * }}
      */
-    function (search, record, runtime, format) {
+    function (search, record, runtime, format, action) {
 
         /**
          * @param {BeforeLoadContext} context
@@ -45,9 +45,9 @@ define(['N/search', 'N/record', 'N/runtime', 'N/format'],
          * @return {void}
          */
         function beforeSubmit(context) {
-           var soLineValsStored = {};
+            var soLineValsStored = {};
 
-           try {
+            try {
 
             } catch (e) {
                 log.error('beforeSubmit', JSON.parse(JSON.stringify(e)));
@@ -87,17 +87,23 @@ define(['N/search', 'N/record', 'N/runtime', 'N/format'],
             var totalIaSeatsTerm = 0
             var totalMyPanelTerm = 0
 
-            var revArgSpecialTermsNotes = newRecord.getValue('custbody_revarg_specialtermsnotes')
+            var skipFVandAllocationScript = newRecord.getValue('custbody_donot_trigger_allocation');
+            log.debug('custbody_donot_trigger_allocation', skipFVandAllocationScript);
+            var revArgSpecialTermsNotes = newRecord.getValue('custbody_revarg_specialtermsnotes') || '';
             var revenueElementLineCount = newRecord.getLineCount({
                 sublistId: 'revenueelement'
             });
             var orderId = '';
             // END VARIABLE INITIALIZATION
 
+            if (skipFVandAllocationScript){
+                return;
+            }
+
             for (var i=0; revenueElementLineCount != 0 && i < revenueElementLineCount; i++){
                 var source = newRecord.getSublistValue({sublistId: 'revenueelement', fieldId: 'source', line: i});
 
-                if (!source.includes('Sales Order')){
+                if (source.indexOf('Sales Order') == -1 && source.indexOf('Return') == -1  ){
                     continue;
                 }
 
@@ -115,10 +121,10 @@ define(['N/search', 'N/record', 'N/runtime', 'N/format'],
                 }
 
 
-              if (typeof(soLineVals.orderId) != 'undefined')
-              {
-                orderId = soLineVals.orderId;
-              }
+                if (typeof(soLineVals.orderId) != 'undefined')
+                {
+                    orderId = soLineVals.orderId;
+                }
 
                 if(soLineVals.contractLineSpecialTerms == true){
                     checkSpecialTerms = true
@@ -172,7 +178,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/format'],
                 var discountedAmount = newRecord.getSublistValue({sublistId: 'revenueelement', fieldId: 'discountedamount', line: i});
                 var quantity = newRecord.getSublistValue({sublistId: 'revenueelement', fieldId: 'quantity', line: i});
 
-                if(discountItem == true || (!isEmpty(soLineVals.totalOneTimeDiscount) && soLineVals.totalOneTimeDiscount != 0.00 )){
+                if(soLineVals.discountItem == true || (!isEmpty(soLineVals.totalOneTimeDiscount) && soLineVals.totalOneTimeDiscount != 0.00 )){
                     checkDiscountLineinArr = true
                 }
 
@@ -188,19 +194,19 @@ define(['N/search', 'N/record', 'N/runtime', 'N/format'],
                     }
                 }
 
-                if (subscriptionItem === true){
+                if (itemData.subscriptionItem === true){
                     var subscriptionCalculatedValue = newRecord.getSublistValue({sublistId: 'revenueelement', fieldId: 'calculatedamount', line: i});
                     //log.debug('subscriptionCalculatedValue', subscriptionCalculatedValue)
                     totalSubscriptionValue += subscriptionCalculatedValue
                 }
 
-                if (platformItem === true){
+                if (itemData.platformItem === true){
                     var platformCalculatedValue = newRecord.getSublistValue({sublistId: 'revenueelement', fieldId: 'calculatedamount', line: i});
                     //log.debug('platformCalculatedValue', platformCalculatedValue)
                     totalPlatformValue += platformCalculatedValue
                 }
 
-                if (seatsItem === true){
+                if (itemData.seatsItem === true){
                     var seatsCalculatedValue = newRecord.getSublistValue({sublistId: 'revenueelement', fieldId: 'calculatedamount', line: i});
                     //log.debug('seatsCalculatedValue', seatsCalculatedValue)
                     totalSeatsValue += seatsCalculatedValue
@@ -267,28 +273,20 @@ define(['N/search', 'N/record', 'N/runtime', 'N/format'],
 
             if (orderId != null && orderId != '')
             {
-                var orderLookupObj = search.lookupFields({
-                    type: 'customrecord_order',
-                    id: orderId,
-                    columns: ['custrecord_is_ord_opportunity_name', 'custrecord_is_ord_oppty_close_date']
-                });
-                
-                var opptyName = orderLookupObj.custrecord_is_ord_opportunity_name;
-                var opptyDate = orderLookupObj.custrecord_is_ord_oppty_close_date;
-                log.debug('opptyName', opptyName);
-                log.debug('opptyDate', opptyDate);
+                log.debug('opptyName', soLineVals.opptyName);
+                log.debug('opptyDate', soLineVals.opptyClseDate);
 
-                newRecord.setValue('custbody_ut_rev_oppty_name', opptyName)
-                newRecord.setValue('custbody_ut_rev_oppty_close_date', opptyDate)
-               
+                newRecord.setValue('custbody_ut_rev_oppty_name', soLineVals.opptyName)
+                newRecord.setValue('custbody_ut_rev_oppty_close_date', soLineVals.opptyClseDate)
+
             }
 
-          for (var j = 0; revenueElementLineCount != 0 && j < revenueElementLineCount; j++){
+            for (var j = 0; revenueElementLineCount != 0 && j < revenueElementLineCount; j++){
                 var source = newRecord.getSublistValue({sublistId: 'revenueelement', fieldId: 'source', line: j});
 
-                if (!source.includes('Sales Order')){
-                  continue;
-                 }
+                if (source.indexOf('Sales Order') == -1){
+                    continue;
+                }
                 var subscriptionItemId = newRecord.getSublistValue({sublistId: 'revenueelement', fieldId: 'item', line: j});
                 var discountedSalesAmount = newRecord.getSublistValue({sublistId: 'revenueelement', fieldId: 'discountedamount', line: j});
 
@@ -300,20 +298,20 @@ define(['N/search', 'N/record', 'N/runtime', 'N/format'],
                 revRecEndDate = new Date(revRecEndDate)
                 //log.debug('revRecEndDate', revRecEndDate)
 
-                var manualFairValueOverride = newRecord.getSublistValue({sublistId: 'revenueelement', fieldId: 'custcol_ut_re_manualfvoverride', line: j});
+                var manualFairValueOverride = newRecord.getSublistValue({sublistId: 'revenueelement', fieldId: 'custcol_uz_re_manualfvoverride', line: j});
                 var sourceIdLookup = newRecord.getSublistValue({sublistId: 'revenueelement', fieldId: 'sourceid', line: j}); // lineuniquekey on SO
                 log.debug('sourceIdLookup', sourceIdLookup)
 
                 var subItemData = getItemData(subscriptionItemId);
 
-              var soLineVals;
+                var soLineVals;
 
-              if (soLineValsStored[sourceIdLookup]){
-                  soLineVals = soLineValsStored[sourceIdLookup];
-              } else {
-                  soLineVals = getSoLineVals(sourceIdLookup);
-                  soLineValsStored[sourceId] = soLineVals;
-              }
+                if (soLineValsStored[sourceIdLookup]){
+                    soLineVals = soLineValsStored[sourceIdLookup];
+                } else {
+                    soLineVals = getSoLineVals(sourceIdLookup);
+                    soLineValsStored[sourceId] = soLineVals;
+                }
 
                 if (soLineVals.bypassFvCalc === true){
                     newRecord.setSublistValue({sublistId: 'revenueelement', fieldId: 'fairvalueoverride', line: j, value: true});
@@ -321,21 +319,25 @@ define(['N/search', 'N/record', 'N/runtime', 'N/format'],
                     newRecord.setSublistValue({sublistId: 'revenueelement', fieldId: 'calculatedamount', line: j, value: discountedSalesAmount});
                 }
 
+                log.debug('subItemData.premierSupportItem', subItemData.premierSupportItem)
+                log.debug('soLineVals.bypassFvCalc', soLineVals.bypassFvCalc)
+                log.debug('manualFairValueOverride', manualFairValueOverride)
                 if(subItemData.premierSupportItem === true && soLineVals.bypassFvCalc === false && manualFairValueOverride === false) {
 
                     log.audit('Set Premier Support Fair Value Pricing', 'START');
 
 
                     if(!isEmpty(revRecStartDate) && !isEmpty(revRecEndDate)) {
-                        var premierSupportStartDateEndDateDifference = revRecEndDate - revRecStartDate
-                        log.debug('premierSupportStartDateEndDateDifference', premierSupportStartDateEndDateDifference)
+                        var premierSupportStartDateEndDateDifference = (revRecEndDate - revRecStartDate)
+                        log.debug('premierSupportStartDateEndDateDifference- DAYS', premierSupportStartDateEndDateDifference/(1000 * 3600 * 24))
                     }
-
+                    log.debug('totalPremierSupportTerm- DAYS', totalPremierSupportTerm/(1000 * 3600 * 24));
                     if(totalPremierSupportTerm == 0){
                         totalPremierSupportTerm = 1
                     }
 
                     var percentOfTotal = premierSupportStartDateEndDateDifference/totalPremierSupportTerm
+                    log.debug('percentOfTotal ', percentOfTotal);
                     if(percentOfTotal == 0){
                         percentOfTotal = 1
                     }
@@ -459,17 +461,17 @@ define(['N/search', 'N/record', 'N/runtime', 'N/format'],
             if((type == context.UserEventType.CREATE) && (!isEmpty(complianceCheck))) {
                 log.debug('complianceCheck', complianceCheck)
                 //newRecord.setValue('compliant', complianceCheck)
-               newRecord.setValue('custbody_ut_arr_reallocate', true)
-              
+                newRecord.setValue('custbody_ut_arr_reallocate', true)
+
             }
 
             var reallocArr =  newRecord.getValue('custbody_ut_arr_reallocate');
             if ((reallocArr) && (type == context.UserEventType.EDIT))
             {
-                  newRecord.setValue('compliant', false)
-                  newRecord.setValue('custbody_ut_arr_reallocate', false)
+                newRecord.setValue('compliant', false)
+                newRecord.setValue('custbody_ut_arr_reallocate', false)
             }
-          
+
             log.audit('type = ' + type, 'Get Revenue Element Data END');
 
 
@@ -481,17 +483,33 @@ define(['N/search', 'N/record', 'N/runtime', 'N/format'],
          */
         function afterSubmit(context) {
             try {
-                log.audit('afterSubmit', {
-                    type: context.type,
-                    newRecord: {
-                        type: context.newRecord.type,
+
+                if (context.newRecord.getValue( 'custbody_donot_trigger_allocation')) {
+                    log.debug('SKIP Re-Allocation');
+
+                    var id = record.submitFields({
+                        type: record.Type.REVENUE_ARRANGEMENT,
                         id: context.newRecord.id,
-                    }
-                    //oldRecord: {
-                    //  type: context.oldRecord.type,
-                    //  id: context.oldRecord.id,
-                    //},
-                });
+                        values: {
+                            custbody_donot_trigger_allocation: false
+                        },
+                        options: {
+                            enableSourcing: false,
+                            ignoreMandatoryFields: true
+                        }
+                    });
+
+                } else {
+                    log.debug('Triggering Allocation');
+
+                    var result = action.execute({
+                        recordType: 'revenuearrangement',
+                        id: 'allocate',
+                        params: {recordId: context.newRecord.id}
+                    });
+                }
+
+
 
                 var newRecord = context.newRecord;
                 var contextType = newRecord.type
@@ -598,6 +616,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/format'],
                     'custitem_ia_seats', 'custitem_mypanel', 'custitem_subscription',  'custitem_platform',
                     'custitem_seats'] //'custitem_otd_item' removed
             });
+
             var dataObj =  {
                 subscriptionItem :ItemLookupObj.custitem_subscription,
                 platformItem : ItemLookupObj.custitem_platform,
@@ -612,13 +631,13 @@ define(['N/search', 'N/record', 'N/runtime', 'N/format'],
             return dataObj;
         }
 
-        function getSoLineVals (lineUID)submit{
+        function getSoLineVals (lineUID){
             var dataObj = {};
             var soLineSearch = search.create({
-                type: search.Type.SALES_ORDER,
+                type: search.Type.TRANSACTION,
                 filters:
                     [
-                        ["lineuniquekey", "anyof", lineUID]
+                        ["lineuniquekey", "equalto", lineUID]
                     ],
                 columns:
                     [
@@ -657,7 +676,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/format'],
         return {
             // beforeLoad: beforeLoad,
             beforeSubmit: beforeSubmit,
-            // afterSubmit: afterSubmit,
+            afterSubmit: afterSubmit
         };
 
     }
